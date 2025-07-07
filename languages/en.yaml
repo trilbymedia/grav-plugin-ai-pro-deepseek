@@ -1,0 +1,12 @@
+PLUGIN_AI_PRO_DEEPSEEK:
+  PLUGIN_STATUS: Plugin Status
+  API_KEY: API Key
+  API_KEY_HELP: Get your API key from platform.deepseek.com
+  ENDPOINT: API Endpoint
+  ENDPOINT_HELP: DeepSeek API endpoint URL
+  MODEL: Model
+  TEMPERATURE: Temperature
+  TEMPERATURE_HELP: Controls randomness (0 = deterministic, 2 = very random)
+  MAX_TOKENS: Max Tokens
+  TIMEOUT: Timeout (seconds)
+  TIMEOUT_HELP: Maximum time to wait for API response

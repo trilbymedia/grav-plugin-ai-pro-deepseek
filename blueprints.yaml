@@ -1,0 +1,84 @@
+name: AI Pro - DeepSeek Provider
+slug: ai-pro-deepseek
+type: plugin
+version: 1.0.0
+description: DeepSeek LLM provider for AI Pro plugin
+icon: robot
+author:
+  name: AI Pro Team
+  email: support@example.com
+homepage: https://github.com/yourusername/grav-plugin-ai-pro-deepseek
+keywords: ai, llm, deepseek, ai-pro
+bugs: https://github.com/yourusername/grav-plugin-ai-pro-deepseek/issues
+license: MIT
+
+dependencies:
+  - { name: grav, version: '>=1.7.0' }
+  - { name: ai-pro, version: '>=1.0.0' }
+
+form:
+  validation: loose
+  fields:
+    enabled:
+      type: toggle
+      label: PLUGIN_AI_PRO_DEEPSEEK.PLUGIN_STATUS
+      highlight: 1
+      default: 0
+      options:
+        1: PLUGIN_ADMIN.ENABLED
+        0: PLUGIN_ADMIN.DISABLED
+      validate:
+        type: bool
+
+    api_key:
+      type: text
+      label: PLUGIN_AI_PRO_DEEPSEEK.API_KEY
+      help: PLUGIN_AI_PRO_DEEPSEEK.API_KEY_HELP
+      placeholder: sk-...
+      validate:
+        required: true
+
+    api_status:
+      type: api-status
+      provider: deepseek
+
+    endpoint:
+      type: text
+      label: PLUGIN_AI_PRO_DEEPSEEK.ENDPOINT
+      help: PLUGIN_AI_PRO_DEEPSEEK.ENDPOINT_HELP
+      default: 'https://api.deepseek.com/v1'
+
+    model:
+      type: select
+      label: PLUGIN_AI_PRO_DEEPSEEK.MODEL
+      default: deepseek-chat
+      data-options@: '\Grav\Plugin\AIProDeepSeek\DeepSeekProvider::getModelOptions'
+      validate:
+        required: true
+
+    temperature:
+      type: range
+      label: PLUGIN_AI_PRO_DEEPSEEK.TEMPERATURE
+      default: 0.7
+      help: PLUGIN_AI_PRO_DEEPSEEK.TEMPERATURE_HELP
+      validate:
+        min: 0
+        max: 2
+        step: 0.1
+
+    max_tokens:
+      type: number
+      label: PLUGIN_AI_PRO_DEEPSEEK.MAX_TOKENS
+      default: 4096
+      validate:
+        min: 1
+        max: 32768
+
+    timeout:
+      type: number
+      label: PLUGIN_AI_PRO_DEEPSEEK.TIMEOUT
+      default: 60
+      help: PLUGIN_AI_PRO_DEEPSEEK.TIMEOUT_HELP
+      validate:
+        min: 10
+        max: 300

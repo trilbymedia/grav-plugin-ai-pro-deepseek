@@ -1,0 +1,24 @@
+{
+    "name": "grav-plugin/ai-pro-deepseek",
+    "type": "grav-plugin",
+    "description": "DeepSeek provider for AI Pro plugin",
+    "keywords": ["ai", "llm", "deepseek", "ai-pro"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "AI Pro Team",
+            "email": "support@example.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.3.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Grav\\Plugin\\AIProDeepSeek\\": "classes/"
+        },
+        "classmap": [
+            "ai-pro-deepseek.php"
+        ]
+    }
+}
