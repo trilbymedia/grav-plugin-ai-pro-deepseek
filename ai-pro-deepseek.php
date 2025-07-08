@@ -43,7 +43,6 @@ class AiProDeepseekPlugin extends Plugin
     public function onPluginsInitialized(): void
     {
         // Don't need to do anything here since we're subscribing to onAIProvidersRegister directly
-        $this->grav['log']->addDebug('AI Pro DeepSeek: Plugin initialized');
     }
 
     /**
