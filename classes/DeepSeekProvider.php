@@ -1,6 +1,18 @@
 <?php
 namespace Grav\Plugin\AIProDeepSeek;
 
+// Only define the class if AI Pro is available
+if (!class_exists('\Grav\Plugin\AIPro\Providers\AbstractProvider')) {
+    // Create a dummy class that does nothing when AI Pro is not available
+    class DeepSeekProvider {
+        public function __construct($name, $config = null) {}
+        public static function getModelOptions(): array { 
+            return ['deepseek-chat' => 'DeepSeek Chat (AI Pro plugin required)'];
+        }
+    }
+    return;
+}
+
 use Grav\Plugin\AIPro\Providers\AbstractProvider;
 use Grav\Plugin\AIPro\Models\Request;
 use Grav\Plugin\AIPro\Models\Response;
@@ -284,15 +296,58 @@ class DeepSeekProvider extends AbstractProvider
      */
     public function getModels(): array
     {
-        // Return cached models if available
+        // Return cached models if available for this request
         if (!empty($this->models)) {
             return $this->models;
         }
-        
-        // For better performance, we'll use a static list of models
-        // DeepSeek's model list doesn't change frequently
+
+        // Check persistent cache first
+        $cacheKey = 'ai-pro-models-deepseek';
+        if (isset($this->grav['cache'])) {
+            $cached = $this->grav['cache']->fetch($cacheKey);
+            if ($cached !== false) {
+                $this->models = $cached;
+                return $this->models;
+            }
+        }
+
+        // DeepSeek exposes OpenAI-compatible models endpoint
+        try {
+            $endpoint = rtrim($this->config->get('endpoint', 'https://api.deepseek.com/v1'), '/');
+            $url = $endpoint . '/models';
+
+            $models = [];
+            $client = $this->grav['http_client'] ?? null;
+            if ($client) {
+                $resp = $client->request('GET', $url, [
+                    'headers' => [ 'Authorization' => 'Bearer ' . $this->config->get('api_key') ],
+                    'timeout' => (int)$this->config->get('timeout', 12),
+                ]);
+                if ($resp->getStatusCode() === 200) {
+                    $data = json_decode($resp->getContent(), true);
+                    $models = $this->parseModelList($data);
+                }
+            } else {
+                $models = $this->fetchModelsWithCurl($url);
+            }
+
+            if (!empty($models)) {
+                // Save and return
+                $this->models = $models;
+                if (isset($this->grav['cache'])) {
+                    $this->grav['cache']->save($cacheKey, $this->models, 86400);
+                }
+                return $this->models;
+            }
+        } catch (\Throwable $e) {
+            // fall back to defaults below
+        }
+
+        // Fallback default list
         $this->models = $this->getDefaultModels();
-        
+        if (isset($this->grav['cache'])) {
+            $this->grav['cache']->save($cacheKey, $this->models, 86400);
+        }
         return $this->models;
     }
     
@@ -325,6 +380,45 @@ class DeepSeekProvider extends AbstractProvider
                 'description' => ''
             ],
         ];
+    }
+
+    /**
+     * Parse OpenAI-compatible models response
+     */
+    protected function parseModelList(array $data): array
+    {
+        $out = [];
+        foreach (($data['data'] ?? []) as $m) {
+            if (!is_array($m)) continue;
+            $id = $m['id'] ?? null; if (!$id) continue;
+            $name = $m['name'] ?? $this->formatModelName($id);
+            $desc = $m['description'] ?? '';
+            $ctx = $m['context_window'] ?? ($m['input_token_limit'] ?? 32768);
+            $out[] = [ 'id' => $id, 'name' => $name, 'description' => $desc, 'context_window' => $ctx ];
+        }
+        // sort by name for readability
+        usort($out, function($a,$b){ return strcmp($a['name'], $b['name']); });
+        return $out;
+    }
+
+    /**
+     * Curl fallback to fetch models
+     */
+    protected function fetchModelsWithCurl(string $url): array
+    {
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [ 'Authorization: Bearer ' . $this->config->get('api_key') ],
+            CURLOPT_TIMEOUT => (int)$this->config->get('timeout', 12),
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+        $res = curl_exec($ch);
+        curl_close($ch);
+        $data = json_decode($res, true);
+        if (!is_array($data)) return [];
+        return $this->parseModelList($data);
     }
 
     /**

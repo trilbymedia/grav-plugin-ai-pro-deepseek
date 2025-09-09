@@ -30,10 +30,18 @@ class AiProDeepseekPlugin extends Plugin
     /**
      * Composer autoload
      *
-     * @return ClassLoader
+     * @return ClassLoader|null
      */
-    public function autoload(): ClassLoader
+    public function autoload(): ?ClassLoader
     {
+        // Only load our autoloader if AI Pro is enabled
+        // This prevents class loading errors when AI Pro is disabled
+        $aiProEnabled = $this->grav['config']->get('plugins.ai-pro.enabled');
+        
+        if (!$aiProEnabled) {
+            return null;
+        }
+        
         return require __DIR__ . '/vendor/autoload.php';
     }
 
@@ -42,7 +50,31 @@ class AiProDeepseekPlugin extends Plugin
      */
     public function onPluginsInitialized(): void
     {
-        // Don't need to do anything here since we're subscribing to onAIProvidersRegister directly
+        // Check if AI Pro plugin is enabled
+        $aiProEnabled = $this->grav['config']->get('plugins.ai-pro.enabled');
+        
+        if (!$aiProEnabled) {
+            // AI Pro is not enabled, stop processing
+            $this->grav['log']->addDebug('AI Pro DeepSeek: AI Pro plugin is not enabled, DeepSeek provider will not be registered');
+            // Remove our event subscriptions to prevent further processing
+            $this->disable([
+                'onAIProvidersRegister' => ['onAIProvidersRegister', 0]
+            ]);
+            return;
+        }
+        
+        // Check if AI Pro classes are available
+        if (!class_exists('\Grav\Plugin\AIPro\Providers\AbstractProvider')) {
+            $this->grav['log']->addWarning('AI Pro DeepSeek: AI Pro classes not found, DeepSeek provider will not be registered');
+            // Remove our event subscriptions to prevent further processing
+            $this->disable([
+                'onAIProvidersRegister' => ['onAIProvidersRegister', 0]
+            ]);
+            return;
+        }
+        
+        // AI Pro is enabled and classes are available, continue normally
+        $this->grav['log']->addDebug('AI Pro DeepSeek: AI Pro is enabled, DeepSeek provider ready');
     }
 
     /**
