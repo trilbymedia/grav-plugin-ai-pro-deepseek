@@ -30,12 +30,27 @@ class DeepSeekProvider extends AbstractProvider
      */
     public function __construct(string $name, $config = null)
     {
-        // For third-party providers, we need to get the config from our own plugin namespace
-        if ($config === null) {
-            $grav = \Grav\Common\Grav::instance();
-            $config = $grav['config']->get('plugins.ai-pro-deepseek');
+        $grav = \Grav\Common\Grav::instance();
+
+        // Merge explicit config with the plugin configuration so required keys are always present.
+        $pluginConfig = $grav['config']->get('plugins.ai-pro-deepseek');
+        if ($pluginConfig instanceof \Grav\Common\Data\Data) {
+            $pluginConfig = $pluginConfig->toArray();
         }
-        
+
+        if ($config instanceof \Grav\Common\Data\Data) {
+            $config = $config->toArray();
+        }
+
+        if ($config === null) {
+            $config = is_array($pluginConfig) ? $pluginConfig : [];
+        } else {
+            $config = (array)$config;
+            if (is_array($pluginConfig)) {
+                $config = array_replace($pluginConfig, $config);
+            }
+        }
+
         parent::__construct($name, $config);
     }
     
@@ -61,6 +76,7 @@ class DeepSeekProvider extends AbstractProvider
         $this->pricing = [
             'deepseek-chat' => ['input' => 0.14, 'output' => 0.28],
             'deepseek-reasoner' => ['input' => 0.14, 'output' => 0.28],
+            'deepseek-coder' => ['input' => 0.14, 'output' => 0.28],
         ];
     }
 
@@ -78,7 +94,8 @@ class DeepSeekProvider extends AbstractProvider
      */
     protected function getEndpoint(): string
     {
-        return $this->config->get('endpoint', 'https://api.deepseek.com/v1') . '/chat/completions';
+        $base = rtrim($this->config->get('endpoint', 'https://api.deepseek.com/v1'), '/');
+        return $base . '/chat/completions';
     }
 
     /**
@@ -107,6 +124,23 @@ class DeepSeekProvider extends AbstractProvider
             'temperature' => $temperature,
             'max_tokens' => $maxTokens,
         ];
+
+        // Aid troubleshooting by logging the request envelope without sensitive content.
+        if (isset($this->grav['log'])) {
+            try {
+                $this->grav['log']->debug('AI Pro DeepSeek: Prepared request', [
+                    'model' => $model,
+                    'temperature' => $temperature,
+                    'max_tokens' => $maxTokens,
+                    'stream' => $request->getOption('stream') === true,
+                    'message_roles' => array_map(static function ($message) {
+                        return $message['role'] ?? 'unknown';
+                    }, $apiRequest['messages']),
+                ]);
+            } catch (\Throwable $e) {
+                // Ignore logging failures
+            }
+        }
         
         // Add optional parameters
         if ($request->getOption('top_p') !== null) {
@@ -131,11 +165,15 @@ class DeepSeekProvider extends AbstractProvider
         
         // DeepSeek-specific: Add code-related hints for coder model
         if ($model === 'deepseek-coder' && $request->getOption('code_language')) {
-            $apiRequest['messages'][0]['content'] = 
-                "Language: " . $request->getOption('code_language') . "\n\n" . 
-                $apiRequest['messages'][0]['content'];
+            $language = $request->getOption('code_language');
+            foreach ($apiRequest['messages'] as $index => $message) {
+                if (($message['role'] ?? '') === 'user' && isset($message['content']) && is_string($message['content'])) {
+                    $apiRequest['messages'][$index]['content'] = "Language: {$language}\n\n" . $message['content'];
+                    break;
+                }
+            }
         }
-        
+
         return $apiRequest;
     }
 
@@ -271,23 +309,31 @@ class DeepSeekProvider extends AbstractProvider
      */
     public function validateCredentials(): bool
     {
+        if (!$this->isConfigured()) {
+            throw new \Exception('Provider deepseek is not properly configured');
+        }
+
         try {
-            // Try a minimal request to validate API key
+            $models = $this->fetchModelsFromApi(true);
+            if (!empty($models)) {
+                return true;
+            }
+
+            // Fallback to a minimal chat request if the models endpoint returns an empty list
             $request = new Request();
             $request->addUserMessage('Hello');
             $request->setMaxTokens(5);
-            
             $this->chat($request);
+
             return true;
-            
+
         } catch (\Exception $e) {
-            // Check if it's an auth error vs other errors
-            if (strpos($e->getMessage(), 'Invalid API key') !== false ||
-                strpos($e->getMessage(), '401') !== false) {
+            $message = strtolower($e->getMessage());
+            if (strpos($message, 'invalid api key') !== false || strpos($message, '401') !== false) {
                 return false;
             }
-            // Other errors might still mean valid credentials
-            return true;
+
+            throw $e;
         }
     }
 
@@ -296,12 +342,15 @@ class DeepSeekProvider extends AbstractProvider
      */
     public function getModels(): array
     {
-        // Return cached models if available for this request
         if (!empty($this->models)) {
             return $this->models;
         }
 
-        // Check persistent cache first
+        if (!$this->isConfigured()) {
+            $this->models = $this->getDefaultModels();
+            return $this->models;
+        }
+
         $cacheKey = 'ai-pro-models-deepseek';
         if (isset($this->grav['cache'])) {
             $cached = $this->grav['cache']->fetch($cacheKey);
@@ -311,43 +360,26 @@ class DeepSeekProvider extends AbstractProvider
             }
         }
 
-        // DeepSeek exposes OpenAI-compatible models endpoint
         try {
-            $endpoint = rtrim($this->config->get('endpoint', 'https://api.deepseek.com/v1'), '/');
-            $url = $endpoint . '/models';
-
-            $models = [];
-            $client = $this->grav['http_client'] ?? null;
-            if ($client) {
-                $resp = $client->request('GET', $url, [
-                    'headers' => [ 'Authorization' => 'Bearer ' . $this->config->get('api_key') ],
-                    'timeout' => (int)$this->config->get('timeout', 12),
-                ]);
-                if ($resp->getStatusCode() === 200) {
-                    $data = json_decode($resp->getContent(), true);
-                    $models = $this->parseModelList($data);
-                }
-            } else {
-                $models = $this->fetchModelsWithCurl($url);
-            }
-
+            $models = $this->fetchModelsFromApi();
             if (!empty($models)) {
-                // Save and return
                 $this->models = $models;
                 if (isset($this->grav['cache'])) {
                     $this->grav['cache']->save($cacheKey, $this->models, 86400);
                 }
                 return $this->models;
             }
-        } catch (\Throwable $e) {
-            // fall back to defaults below
+        } catch (\Exception $e) {
+            if (isset($this->grav['log'])) {
+                try {
+                    $this->grav['log']->error('AI Pro DeepSeek: Failed to fetch models', ['message' => $e->getMessage()]);
+                } catch (\Throwable $t) {
+                    // ignore logging failures
+                }
+            }
         }
 
-        // Fallback default list
-        $this->models = $this->getDefaultModels();
-        if (isset($this->grav['cache'])) {
-            $this->grav['cache']->save($cacheKey, $this->models, 86400);
-        }
+        $this->models = [];
         return $this->models;
     }
     
@@ -375,9 +407,15 @@ class DeepSeekProvider extends AbstractProvider
             ],
             [
                 'id' => 'deepseek-reasoner',
-                'name' => 'Deepseek Reasoner',
+                'name' => 'DeepSeek Reasoner',
                 'context_window' => 16384,
-                'description' => ''
+                'description' => 'Reasoning focused model'
+            ],
+            [
+                'id' => 'deepseek-coder',
+                'name' => 'DeepSeek Coder',
+                'context_window' => 32768,
+                'description' => 'Code generation and refactoring model'
             ],
         ];
     }
@@ -402,23 +440,143 @@ class DeepSeekProvider extends AbstractProvider
     }
 
     /**
-     * Curl fallback to fetch models
+     * Fetch models from API with optional strict error handling
      */
-    protected function fetchModelsWithCurl(string $url): array
+    protected function fetchModelsFromApi(bool $strict = false): array
     {
+        [$status, $body] = $this->requestModelEndpoint();
+        return $this->handleModelResponse($body, $status, $strict);
+    }
+
+    /**
+     * Execute request to DeepSeek models endpoint
+     */
+    protected function requestModelEndpoint(): array
+    {
+        $base = rtrim($this->config->get('endpoint', 'https://api.deepseek.com/v1'), '/');
+        $url = $base . '/models';
+        $timeout = (int)$this->config->get('timeout', 12);
+
+        $headers = [
+            'Authorization' => 'Bearer ' . $this->config->get('api_key'),
+            'Accept' => 'application/json',
+        ];
+
+        $client = $this->grav['http_client'] ?? null;
+        if ($client) {
+            try {
+                $response = $client->request('GET', $url, [
+                    'headers' => $headers,
+                    'timeout' => $timeout,
+                ]);
+                $status = $response->getStatusCode();
+                $body = $response->getContent(false);
+                return [$status, $body];
+            } catch (\Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface $e) {
+                throw new \Exception('Network error: ' . $e->getMessage());
+            }
+        }
+
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [ 'Authorization: Bearer ' . $this->config->get('api_key') ],
-            CURLOPT_TIMEOUT => (int)$this->config->get('timeout', 12),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $this->config->get('api_key'),
+                'Accept: application/json',
+            ],
+            CURLOPT_TIMEOUT => $timeout,
             CURLOPT_SSL_VERIFYPEER => true,
         ]);
-        $res = curl_exec($ch);
+        $body = curl_exec($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
         curl_close($ch);
-        $data = json_decode($res, true);
-        if (!is_array($data)) return [];
-        return $this->parseModelList($data);
+
+        if ($body === false || $error) {
+            throw new \Exception('Network error: ' . ($error ?: 'Unable to contact DeepSeek API'));
+        }
+
+        return [$status ?: 0, $body ?: ''];
+    }
+
+    /**
+     * Normalize API response status handling
+     */
+    protected function handleModelResponse(string $body, int $status, bool $strict): array
+    {
+        if ($status === 200) {
+            $data = json_decode($body, true);
+            if (!is_array($data)) {
+                if ($strict) {
+                    throw new \Exception('Invalid response from DeepSeek models endpoint');
+                }
+                return [];
+            }
+            return $this->parseModelList($data);
+        }
+
+        $message = $this->extractErrorMessage($body);
+        if ($status === 401) {
+            $message = 'Invalid API key';
+        } elseif ($status === 429) {
+            $message = $message ?: 'Rate limit exceeded';
+        } elseif ($status >= 500) {
+            $message = $message ?: 'DeepSeek API server error';
+        } elseif ($status === 0) {
+            $message = $message ?: 'Unable to reach DeepSeek API';
+        } else {
+            $message = $message ?: 'DeepSeek API error (HTTP ' . $status . ')';
+        }
+
+        if ($strict) {
+            throw new \Exception($message);
+        }
+
+        if (isset($this->grav['log'])) {
+            try {
+                $this->grav['log']->error('AI Pro DeepSeek: Model fetch error', [
+                    'status' => $status,
+                    'message' => $message,
+                ]);
+            } catch (\Throwable $e) {
+                // ignore logging errors
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Extract error message from API payload
+     */
+    protected function extractErrorMessage(string $body): ?string
+    {
+        if ($body === '') {
+            return null;
+        }
+
+        $decoded = json_decode($body, true);
+        if (is_array($decoded)) {
+            $error = $decoded['error'] ?? null;
+            if (is_string($error)) {
+                return $error;
+            }
+            if (is_array($error)) {
+                if (!empty($error['message']) && is_string($error['message'])) {
+                    return $error['message'];
+                }
+                if (!empty($error['code']) && is_string($error['code'])) {
+                    return $error['code'];
+                }
+            }
+            if (!empty($decoded['message']) && is_string($decoded['message'])) {
+                return $decoded['message'];
+            }
+        }
+
+        $trimmed = trim($body);
+        return $trimmed !== '' ? $trimmed : null;
     }
 
     /**
@@ -479,21 +637,17 @@ class DeepSeekProvider extends AbstractProvider
             }
             
             $config = $grav['config']->get('plugins.ai-pro-deepseek');
-            
+
             if (!$config || !$config['enabled'] || empty($config['api_key'])) {
-                // Return default options if not configured
-                $models = [
-                    'deepseek-chat' => 'DeepSeek Chat',
-                    'deepseek-coder' => 'DeepSeek Coder'
-                ];
+                $models = self::getDefaultModelOptions();
                 $modelsCache = $models;
                 return $models;
             }
-            
+
             // Create provider instance
             $provider = new self('deepseek', new \Grav\Common\Data\Data($config));
             $models = $provider->getModels();
-            
+
             $options = [];
             foreach ($models as $model) {
                 $label = $model['name'];
@@ -502,19 +656,32 @@ class DeepSeekProvider extends AbstractProvider
                 }
                 $options[$model['id']] = $label;
             }
-            
+
+            if (empty($options)) {
+                $options = self::getDefaultModelOptions();
+            }
+
             // Cache the models for 24 hours
             $cache->save($cacheKey, $options, 86400);
             $modelsCache = $options;
-            
+
             return $options;
             
         } catch (\Exception $e) {
             // Return defaults on error
-            return [
-                'deepseek-chat' => 'DeepSeek Chat',
-                'deepseek-coder' => 'DeepSeek Coder'
-            ];
+            return self::getDefaultModelOptions();
         }
+    }
+
+    /**
+     * Default blueprint options when API data is unavailable
+     */
+    protected static function getDefaultModelOptions(): array
+    {
+        return [
+            'deepseek-chat' => 'DeepSeek Chat',
+            'deepseek-reasoner' => 'DeepSeek Reasoner',
+            'deepseek-coder' => 'DeepSeek Coder',
+        ];
     }
 }
