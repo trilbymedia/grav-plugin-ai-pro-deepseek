@@ -55,7 +55,7 @@ class AiProDeepseekPlugin extends Plugin
         
         if (!$aiProEnabled) {
             // AI Pro is not enabled, stop processing
-            $this->grav['log']->addDebug('AI Pro DeepSeek: AI Pro plugin is not enabled, DeepSeek provider will not be registered');
+            $this->grav['log']->debug('AI Pro DeepSeek: AI Pro plugin is not enabled, DeepSeek provider will not be registered');
             // Remove our event subscriptions to prevent further processing
             $this->disable([
                 'onAIProvidersRegister' => ['onAIProvidersRegister', 0]
@@ -65,7 +65,7 @@ class AiProDeepseekPlugin extends Plugin
         
         // Check if AI Pro classes are available
         if (!class_exists('\Grav\Plugin\AIPro\Providers\AbstractProvider')) {
-            $this->grav['log']->addWarning('AI Pro DeepSeek: AI Pro classes not found, DeepSeek provider will not be registered');
+            $this->grav['log']->warning('AI Pro DeepSeek: AI Pro classes not found, DeepSeek provider will not be registered');
             // Remove our event subscriptions to prevent further processing
             $this->disable([
                 'onAIProvidersRegister' => ['onAIProvidersRegister', 0]
@@ -74,7 +74,7 @@ class AiProDeepseekPlugin extends Plugin
         }
         
         // AI Pro is enabled and classes are available, continue normally
-        $this->grav['log']->addDebug('AI Pro DeepSeek: AI Pro is enabled, DeepSeek provider ready');
+        $this->grav['log']->debug('AI Pro DeepSeek: AI Pro is enabled, DeepSeek provider ready');
     }
 
     /**
@@ -82,17 +82,17 @@ class AiProDeepseekPlugin extends Plugin
      */
     public function onAIProvidersRegister(Event $event): void
     {
-        $this->grav['log']->addDebug('AI Pro DeepSeek: onAIProvidersRegister event fired');
+        $this->grav['log']->debug('AI Pro DeepSeek: onAIProvidersRegister event fired');
         
         $providers = $event['providers'];
         
         // Register our provider if it's enabled in config
         $pluginEnabled = $this->grav['config']->get('plugins.ai-pro-deepseek.enabled');
         if ($pluginEnabled) {
-            $this->grav['log']->addDebug('AI Pro DeepSeek: Registering DeepSeek provider');
+            $this->grav['log']->debug('AI Pro DeepSeek: Registering DeepSeek provider');
             $providers->register('deepseek', DeepSeekProvider::class);
         } else {
-            $this->grav['log']->addDebug('AI Pro DeepSeek: Plugin is not enabled, skipping provider registration');
+            $this->grav['log']->debug('AI Pro DeepSeek: Plugin is not enabled, skipping provider registration');
         }
     }
 }
