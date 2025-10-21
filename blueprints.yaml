@@ -5,11 +5,12 @@ version: 1.0.0
 description: DeepSeek LLM provider for AI Pro plugin
 icon: robot
 author:
-  name: AI Pro Team
-  email: support@example.com
-homepage: https://github.com/yourusername/grav-plugin-ai-pro-deepseek
-keywords: ai, llm, deepseek, ai-pro
-bugs: https://github.com/yourusername/grav-plugin-ai-pro-deepseek/issues
+  name: Trilby Media, LLC
+  email: hello@trilby.media
+homepage: https://github.com/trilbymedia/ai-pro-deepseek
+keywords: grav, plugin, seo, ai, chatgpt, anthropic
+bugs: https://github.com/trilbymedia/ai-pro-deepseek/issues
+docs: https://github.com/trilbymedia/ai-pro-deepseek
 license: MIT
 
 dependencies:
@@ -57,14 +58,15 @@ form:
         required: true
 
     temperature:
-      type: range
+      type: number
       label: PLUGIN_AI_PRO_DEEPSEEK.TEMPERATURE
-      default: 0.7
+      placeholder: 'Use model default'
       help: PLUGIN_AI_PRO_DEEPSEEK.TEMPERATURE_HELP
       validate:
         min: 0
         max: 2
         step: 0.1
+        required: false
 
     max_tokens:
       type: number

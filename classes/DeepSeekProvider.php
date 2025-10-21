@@ -115,15 +115,20 @@ class DeepSeekProvider extends AbstractProvider
     protected function buildRequest(Request $request): array
     {
         $model = $request->getModel() ?? $this->config->get('model', 'deepseek-chat');
-        $temperature = $request->getTemperature() ?? $this->config->get('temperature', 0.7);
+        $temperature = $request->getTemperature();
+        if ($temperature === null) {
+            $temperature = $this->config->get('temperature');
+        }
         $maxTokens = $request->getMaxTokens() ?? $this->config->get('max_tokens', 4096);
         
         $apiRequest = [
             'model' => $model,
             'messages' => $request->getMessagesWithContext(),
-            'temperature' => $temperature,
             'max_tokens' => $maxTokens,
         ];
+        if ($temperature !== null) {
+            $apiRequest['temperature'] = $temperature;
+        }
 
         // Aid troubleshooting by logging the request envelope without sensitive content.
         if (isset($this->grav['log'])) {
